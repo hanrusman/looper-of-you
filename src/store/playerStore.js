@@ -151,8 +151,6 @@ const usePlayerStore = create((set, get) => ({
 
   adjustTempo: (newBpm) => {
     const state = get();
-    if (state.syncMode) return; // Can't adjust tempo in sync mode
-
     const clamped = Math.max(40, Math.min(200, newBpm));
     set({ bpm: clamped });
 

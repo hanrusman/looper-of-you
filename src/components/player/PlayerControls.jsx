@@ -53,25 +53,47 @@ export default function PlayerControls() {
         </IconButton>
 
         {syncMode ? (
-          /* In sync mode: show fine-tune offset controls */
-          <div className="flex flex-col items-center min-w-[80px]">
-            <span className="text-xs text-gray-500 font-semibold">SYNC</span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => adjustSyncOffset(-0.25)}
-                className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 font-bold text-sm active:scale-90 transition-transform"
-              >
-                -
-              </button>
-              <span className={`text-sm font-bold w-12 text-center ${syncOffset !== 0 ? 'text-amber-600' : 'text-gray-600'}`}>
-                {syncOffset >= 0 ? '+' : ''}{syncOffset.toFixed(1)}s
-              </span>
-              <button
-                onClick={() => adjustSyncOffset(0.25)}
-                className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 font-bold text-sm active:scale-90 transition-transform"
-              >
-                +
-              </button>
+          /* In sync mode: show BPM + fine-tune offset controls */
+          <div className="flex items-center gap-3">
+            <div className="flex flex-col items-center">
+              <span className="text-xs text-gray-500 font-semibold">BPM</span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => adjustTempo(bpm - 1)}
+                  className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 font-bold text-sm active:scale-90 transition-transform"
+                >
+                  -
+                </button>
+                <span className="text-sm font-bold text-gray-600 w-8 text-center">
+                  {bpm}
+                </span>
+                <button
+                  onClick={() => adjustTempo(bpm + 1)}
+                  className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 font-bold text-sm active:scale-90 transition-transform"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-col items-center">
+              <span className="text-xs text-gray-500 font-semibold">SYNC</span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => adjustSyncOffset(-0.25)}
+                  className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 font-bold text-sm active:scale-90 transition-transform"
+                >
+                  -
+                </button>
+                <span className={`text-sm font-bold w-12 text-center ${syncOffset !== 0 ? 'text-amber-600' : 'text-gray-600'}`}>
+                  {syncOffset >= 0 ? '+' : ''}{syncOffset.toFixed(1)}s
+                </span>
+                <button
+                  onClick={() => adjustSyncOffset(0.25)}
+                  className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 font-bold text-sm active:scale-90 transition-transform"
+                >
+                  +
+                </button>
+              </div>
             </div>
           </div>
         ) : (
