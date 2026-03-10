@@ -28,7 +28,7 @@ function StopIcon() {
 }
 
 export default function PlayerControls() {
-  const { isPlaying, play, pause, stop, bpm, adjustTempo, currentBeat, beatsPerChord, syncMode, strumPattern, strumSubdivision } =
+  const { isPlaying, play, pause, stop, bpm, adjustTempo, currentBeat, beatsPerChord, syncMode, strumPattern, strumSubdivision, syncOffset, adjustSyncOffset } =
     usePlayerStore();
 
   return (
@@ -53,14 +53,25 @@ export default function PlayerControls() {
         </IconButton>
 
         {syncMode ? (
-          /* In sync mode: show YouTube sync indicator instead of tempo controls */
+          /* In sync mode: show fine-tune offset controls */
           <div className="flex flex-col items-center min-w-[80px]">
             <span className="text-xs text-gray-500 font-semibold">SYNC</span>
-            <div className="flex items-center gap-1.5">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-red-500">
-                <path d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0C.488 3.45.029 5.804 0 12c.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0C23.512 20.55 23.971 18.196 24 12c-.029-6.185-.484-8.549-4.385-8.816zM9 16V8l8 4-8 4z" />
-              </svg>
-              <span className="text-sm font-bold text-gray-600">{bpm} BPM</span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => adjustSyncOffset(-0.25)}
+                className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 font-bold text-sm active:scale-90 transition-transform"
+              >
+                -
+              </button>
+              <span className={`text-sm font-bold w-12 text-center ${syncOffset !== 0 ? 'text-amber-600' : 'text-gray-600'}`}>
+                {syncOffset >= 0 ? '+' : ''}{syncOffset.toFixed(1)}s
+              </span>
+              <button
+                onClick={() => adjustSyncOffset(0.25)}
+                className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 font-bold text-sm active:scale-90 transition-transform"
+              >
+                +
+              </button>
             </div>
           </div>
         ) : (

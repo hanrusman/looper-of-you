@@ -7,7 +7,7 @@ let syncPollId = null;
 // Compensate for YouTube IFrame API getCurrentTime() lag.
 // The API returns a cached value that trails actual audio playback
 // by ~200-500ms due to cross-iframe postMessage communication.
-const SYNC_LOOKAHEAD_S = 0.5;
+const SYNC_LOOKAHEAD_S = 1.0;
 
 const usePlayerStore = create((set, get) => ({
   isPlaying: false,
@@ -22,6 +22,9 @@ const usePlayerStore = create((set, get) => ({
   syncMode: false,
   youtubeStartTime: 0,
   ytPlayerRef: null, // set by SongPlayerScreen
+
+  // Sync fine-tune offset (seconds, adjustable by user)
+  syncOffset: 0,
 
   // Strum pattern fields
   strumPattern: null, // parsed array: ['D','-','D','U',...] or null
@@ -132,7 +135,7 @@ const usePlayerStore = create((set, get) => ({
       // Calculate the time position for this chord index and seek YouTube
       const secondsPerBeat = 60 / state.bpm;
       const secondsPerChord = state.beatsPerChord * secondsPerBeat;
-      const targetTime = state.youtubeStartTime + (clamped * secondsPerChord) - SYNC_LOOKAHEAD_S;
+      const targetTime = state.youtubeStartTime + (clamped * secondsPerChord) - SYNC_LOOKAHEAD_S - state.syncOffset;
       const ytRef = state.ytPlayerRef;
       if (ytRef?.current?.isReady()) {
         ytRef.current.seekTo(targetTime);
@@ -140,6 +143,10 @@ const usePlayerStore = create((set, get) => ({
     }
 
     set({ currentChordIndex: clamped, currentBeat: 0, strumSubdivision: 0 });
+  },
+
+  adjustSyncOffset: (delta) => {
+    set((state) => ({ syncOffset: Math.round((state.syncOffset + delta) * 4) / 4 }));
   },
 
   adjustTempo: (newBpm) => {
@@ -231,7 +238,7 @@ function _startSyncPoll(get, set) {
     }
 
     const videoTime = ytRef.current.getCurrentTime();
-    const elapsed = videoTime - state.youtubeStartTime + SYNC_LOOKAHEAD_S;
+    const elapsed = videoTime - state.youtubeStartTime + SYNC_LOOKAHEAD_S + state.syncOffset;
     const secondsPerBeat = 60 / state.bpm;
     const secondsPerChord = state.beatsPerChord * secondsPerBeat;
 
