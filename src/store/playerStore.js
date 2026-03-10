@@ -4,6 +4,11 @@ import { parseStrumPattern } from '../lib/strumUtils';
 let intervalId = null;
 let syncPollId = null;
 
+// Compensate for YouTube IFrame API getCurrentTime() lag.
+// The API returns a cached value that trails actual audio playback
+// by ~200-500ms due to cross-iframe postMessage communication.
+const SYNC_LOOKAHEAD_S = 0.5;
+
 const usePlayerStore = create((set, get) => ({
   isPlaying: false,
   currentSongId: null,
@@ -127,7 +132,7 @@ const usePlayerStore = create((set, get) => ({
       // Calculate the time position for this chord index and seek YouTube
       const secondsPerBeat = 60 / state.bpm;
       const secondsPerChord = state.beatsPerChord * secondsPerBeat;
-      const targetTime = state.youtubeStartTime + (clamped * secondsPerChord);
+      const targetTime = state.youtubeStartTime + (clamped * secondsPerChord) - SYNC_LOOKAHEAD_S;
       const ytRef = state.ytPlayerRef;
       if (ytRef?.current?.isReady()) {
         ytRef.current.seekTo(targetTime);
@@ -214,19 +219,8 @@ function _startTimerMode(get, set, overrideBpm) {
 function _startSyncPoll(get, set) {
   if (syncPollId) cancelAnimationFrame(syncPollId);
 
-  let lastUpdate = 0;
-
-  function poll(timestamp) {
+  function poll() {
     const state = get();
-    const hasPattern = state.strumPattern && state.strumPattern.length > 0;
-
-    // Poll rate: ~60ms when strum pattern active (for subdivision accuracy), ~250ms otherwise
-    const pollInterval = hasPattern ? 60 : 250;
-    if (timestamp - lastUpdate < pollInterval) {
-      syncPollId = requestAnimationFrame(poll);
-      return;
-    }
-    lastUpdate = timestamp;
 
     if (!state.isPlaying || !state.syncMode) return;
 
@@ -237,7 +231,7 @@ function _startSyncPoll(get, set) {
     }
 
     const videoTime = ytRef.current.getCurrentTime();
-    const elapsed = videoTime - state.youtubeStartTime;
+    const elapsed = videoTime - state.youtubeStartTime + SYNC_LOOKAHEAD_S;
     const secondsPerBeat = 60 / state.bpm;
     const secondsPerChord = state.beatsPerChord * secondsPerBeat;
 
@@ -257,7 +251,7 @@ function _startSyncPoll(get, set) {
 
       // Calculate strum subdivision if pattern exists
       let newSub = 0;
-      if (hasPattern) {
+      if (state.strumPattern && state.strumPattern.length > 0) {
         const patLen = state.strumPattern.length;
         newSub = Math.min(
           Math.floor((chordElapsed / secondsPerChord) * patLen),
