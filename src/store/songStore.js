@@ -78,9 +78,9 @@ const useSongStore = create(
     }),
     {
       name: 'akkoordenboek-songs',
-      version: 3,
+      version: 4,
       migrate: (persistedState, version) => {
-        if (version < 3) {
+        if (version < 4) {
           // Wipe all sample songs so they get re-added with correct data
           return {
             ...persistedState,

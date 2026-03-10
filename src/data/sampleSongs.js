@@ -6,7 +6,7 @@ export const sampleSongs = [
     bpm: 65,
     beatsPerChord: 4,
     capo: 1,
-    strumPattern: 'D - D U - U D U',
+    strumPattern: 'D D D D',
     youtubeId: '2Vv-BfVoq4g',
     youtubeStartTime: 0,
     rawText: `[Intro]
@@ -39,7 +39,7 @@ export const sampleSongs = [
     bpm: 79,
     beatsPerChord: 4,
     capo: 0,
-    strumPattern: 'D - D U - U D U',
+    strumPattern: 'D D U U D U',
     youtubeId: 'lp-EO5I60KA',
     youtubeStartTime: 0,
     rawText: `[Intro]
@@ -112,7 +112,7 @@ export const sampleSongs = [
     bpm: 108,
     beatsPerChord: 4,
     capo: 4,
-    strumPattern: 'D - D U - U D U',
+    strumPattern: 'D - D - D - D -',
     youtubeId: 'nSDgHBxUbVQ',
     youtubeStartTime: 0,
     rawText: `[Intro]
