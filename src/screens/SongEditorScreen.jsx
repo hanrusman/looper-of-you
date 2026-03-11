@@ -9,7 +9,7 @@ import { parseStrumPattern } from '../lib/strumUtils';
 import StrumPattern from '../components/player/StrumPattern';
 import useTapTempo from '../hooks/useTapTempo';
 
-export default function SongEditorScreen({ songId, onSave, onBack }) {
+export default function SongEditorScreen({ songId, importData, onSave, onBack }) {
   const { getSong, addSong, updateSong, deleteSong } = useSongStore();
 
   const [title, setTitle] = useState('');
@@ -48,8 +48,14 @@ export default function SongEditorScreen({ songId, onSave, onBack }) {
         setYoutubeUrl(song.youtubeId ? `https://youtu.be/${song.youtubeId}` : '');
         setYoutubeStartTime(song.youtubeStartTime || 0);
       }
+    } else if (importData) {
+      // Pre-fill from imported data
+      setTitle(importData.title || '');
+      setArtist(importData.artist || '');
+      setRawText(importData.rawText || '');
+      setCapo(importData.capo || 0);
     }
-  }, [songId, getSong]);
+  }, [songId, importData, getSong]);
 
   const handleSave = () => {
     if (!title.trim() || !rawText.trim()) return;

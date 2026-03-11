@@ -1,5 +1,5 @@
-const SECTION_REGEX = /^\[(Verse|Chorus|Bridge|Intro|Outro|Couplet|Refrein|Brug)\s*\d*\]$/i;
-const CHORD_REGEX = /\[([A-G][#b]?m?\d?(?:sus|add|maj|dim|aug|7|9)?)\]([^[]*)/g;
+const SECTION_REGEX = /^\[(Verse|Chorus|Bridge|Intro|Outro|Interlude|Pre-chorus|Post-chorus|Solo|Couplet|Refrein|Brug)\s*\d*\]$/i;
+const CHORD_REGEX = /\[([A-G][#b]?m?\d?(?:sus\d?|add\d?|maj\d?|dim\d?|aug\d?|7|9|11|13|6)?(?:\/[A-G][#b]?)?)\]([^[]*)/g;
 
 const SECTION_LABELS = {
   verse: 'Couplet',
@@ -7,6 +7,10 @@ const SECTION_LABELS = {
   bridge: 'Brug',
   intro: 'Intro',
   outro: 'Outro',
+  interlude: 'Interlude',
+  'pre-chorus': 'Pre-chorus',
+  'post-chorus': 'Post-chorus',
+  solo: 'Solo',
   couplet: 'Couplet',
   refrein: 'Refrein',
   brug: 'Brug',
