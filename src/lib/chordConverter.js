@@ -2,8 +2,6 @@ import ChordSheetJS from 'chordsheetjs';
 
 /**
  * Maps ChordSheetJS section tag names to labels our parser recognizes.
- * Our chordProParser.js SECTION_REGEX accepts:
- * Verse|Chorus|Bridge|Intro|Outro|Interlude|Pre-chorus|Solo|Couplet|Refrein|Brug
  */
 const SECTION_TAG_MAP = {
   verse: 'Verse',
@@ -13,18 +11,85 @@ const SECTION_TAG_MAP = {
   outro: 'Outro',
   interlude: 'Interlude',
   solo: 'Solo',
-  part: null, // generic "part" — use the label if provided
+  part: null,
 };
 
 /**
- * Convert a pasted chord sheet (from Ultimate Guitar or similar) to our ChordPro format.
+ * Maps Portuguese section names from Cifra Club to English equivalents.
+ */
+const PORTUGUESE_SECTION_MAP = {
+  'primeira parte': 'Verse',
+  'segunda parte': 'Verse 2',
+  'terceira parte': 'Verse 3',
+  'quarta parte': 'Verse 4',
+  'refrão': 'Chorus',
+  'refrao': 'Chorus',
+  'ponte': 'Bridge',
+  'introdução': 'Intro',
+  'introducao': 'Intro',
+  'intro': 'Intro',
+  'outro': 'Outro',
+  'final': 'Outro',
+  'solo': 'Solo',
+  'interlúdio': 'Interlude',
+  'interludio': 'Interlude',
+  'pré-refrão': 'Pre-chorus',
+  'pre-refrao': 'Pre-chorus',
+  // Cifra Club often has "Dedilhado" (fingerpicking) sections — skip these
+  'dedilhado': null,
+  'dedilhado - primeira parte': null,
+  'dedilhado - segunda parte': null,
+  'dedilhado - refrão': null,
+};
+
+/**
+ * Normalize Cifra Club section headers in the raw text before parsing.
+ * Converts Portuguese section names and filters out fingerpicking sections.
+ */
+function normalizeCifraClubText(text) {
+  const lines = text.split('\n');
+  const outputLines = [];
+  let skipUntilNextSection = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Check if this line is a section header [Something]
+    const sectionMatch = trimmed.match(/^\[(.+)\]$/);
+    if (sectionMatch) {
+      const sectionName = sectionMatch[1].trim();
+      const lower = sectionName.toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+      // Check if this is a Portuguese section name
+      const mapped = PORTUGUESE_SECTION_MAP[lower];
+      if (mapped === null) {
+        // Skip this section (e.g., fingerpicking tabs)
+        skipUntilNextSection = true;
+        continue;
+      } else if (mapped) {
+        skipUntilNextSection = false;
+        outputLines.push(`[${mapped}]`);
+        continue;
+      }
+
+      // Not Portuguese — pass through (already English)
+      skipUntilNextSection = false;
+      outputLines.push(trimmed);
+      continue;
+    }
+
+    if (skipUntilNextSection) continue;
+    outputLines.push(line);
+  }
+
+  return outputLines.join('\n');
+}
+
+/**
+ * Convert a chord sheet (from any source) to our ChordPro format.
  *
- * Supports:
- * - "Chords over words" format (UG-style)
- * - ChordPro format (already has [brackets])
- * - Plain chords-over-words from any source
- *
- * @param {string} inputText - Raw pasted text
+ * @param {string} inputText - Raw chord text (chords-over-words or ChordPro)
  * @returns {{ chordProText: string, capo: number, detectedTitle: string, detectedArtist: string }}
  */
 export function convertToChordPro(inputText) {
@@ -32,91 +97,62 @@ export function convertToChordPro(inputText) {
     return { chordProText: '', capo: 0, detectedTitle: '', detectedArtist: '' };
   }
 
-  const text = inputText.trim();
+  // Normalize Cifra Club Portuguese section headers
+  let text = normalizeCifraClubText(inputText.trim());
 
-  // Extract capo from text (UG often has "Capo: 3" or "Capo 3" at top)
+  // Extract capo
   let capo = 0;
   const capoMatch = text.match(/[Cc]apo[:\s]*(\d+)/);
   if (capoMatch) {
     capo = parseInt(capoMatch[1], 10);
   }
 
-  // Try to detect if input is already ChordPro format
+  // Detect format
   const hasChordProBrackets = /\[[A-G][#b]?m?[^[\]]*\]/.test(text);
   const hasChordsOverWords = /^[ \t]*[A-G][#b]?m?\d?.*$/m.test(text);
 
   let song;
-
   if (hasChordProBrackets && !hasChordsOverWords) {
-    // Already ChordPro format — parse directly
     const parser = new ChordSheetJS.ChordProParser();
     song = parser.parse(text);
   } else {
-    // Chords-over-words format (from UG or any source)
     const parser = new ChordSheetJS.ChordsOverWordsParser();
     song = parser.parse(text);
   }
 
-  // Build our ChordPro output from the parsed song
+  // Build ChordPro output
   const outputLines = [];
-  let lastSectionEnded = false;
 
   for (const line of song.lines) {
     if (!line.items || line.items.length === 0) continue;
 
     for (const item of line.items) {
-      // Section tags
       if (item.name) {
-        const tagName = item.name;
+        if (item.name.startsWith('end_of_')) continue;
 
-        // Skip end tags
-        if (tagName.startsWith('end_of_')) {
-          lastSectionEnded = true;
-          continue;
-        }
+        if (item.name.startsWith('start_of_')) {
+          const sectionType = item.name.replace('start_of_', '');
+          const label = item.value || '';
+          let sectionName = label || SECTION_TAG_MAP[sectionType] || 'Verse';
 
-        // Handle start tags
-        if (tagName.startsWith('start_of_')) {
-          const sectionType = tagName.replace('start_of_', '');
-          const label = item.value || ''; // e.g., "Verse 1", "Chorus"
-
-          // Map to a name our parser understands
-          let sectionName;
-          if (label) {
-            // Use the label directly if it starts with a recognized section name
-            sectionName = label;
-          } else {
-            sectionName = SECTION_TAG_MAP[sectionType] || 'Verse';
-          }
-
-          // Add blank line before section (for readability)
-          if (outputLines.length > 0) {
-            outputLines.push('');
-          }
+          if (outputLines.length > 0) outputLines.push('');
           outputLines.push(`[${sectionName}]`);
-          lastSectionEnded = false;
           continue;
         }
-
-        // Skip other metadata tags (title, artist, etc.) but try to extract them
         continue;
       }
     }
 
-    // Build chord+lyrics line from ChordLyricsPair items
+    // Build chord+lyrics line
     let lineStr = '';
-    let hasChordContent = false;
-
     for (const item of line.items) {
-      // Skip tags (already handled above)
       if (item.name) continue;
-
       const chord = (item.chords || '').trim();
       const lyrics = item.lyrics || '';
-
-      if (chord) {
+      // Skip non-chord entries: repeat markers like (4), x4, etc.
+      const isRealChord = chord && /^[A-G]/.test(chord);
+      if (isRealChord) {
         lineStr += `[${chord}]${lyrics}`;
-        hasChordContent = true;
       } else if (lyrics) {
         lineStr += lyrics;
       }
@@ -124,26 +160,23 @@ export function convertToChordPro(inputText) {
 
     const trimmedLine = lineStr.trim();
     if (trimmedLine) {
-      // Skip lines that are just capo info
       if (/^[Cc]apo[:\s]*\d+$/.test(trimmedLine)) continue;
-      // Skip lines that are just "x2", "x4" etc.
       if (/^x\d+$/i.test(trimmedLine)) continue;
-
+      // Skip "Parte X De Y" lines from Cifra Club fingerpicking
+      if (/^Parte \d+ De \d+$/i.test(trimmedLine)) continue;
       outputLines.push(trimmedLine);
     }
   }
 
-  // Try to detect title/artist from metadata tags
-  let detectedTitle = '';
-  let detectedArtist = '';
+  let detectedTitle = song.title || '';
+  let detectedArtist = song.artist || '';
 
-  if (song.title) detectedTitle = song.title;
-  if (song.artist) detectedArtist = song.artist;
-
-  // Clean up: remove excessive blank lines
   const chordProText = outputLines
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
+    // Snap chords to word boundaries: "You're g[Em7]onna" → "You're [Em7]gonna"
+    // Only when chord is mid-word (preceded by letters AND followed by letters)
+    .replace(/([a-zA-Z',]+)(\[[\w#b/]+\])(?=[a-zA-Z])/g, '$2$1')
     .trim();
 
   return { chordProText, capo, detectedTitle, detectedArtist };
