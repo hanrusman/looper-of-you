@@ -54,6 +54,7 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
       setArtist(importData.artist || '');
       setRawText(importData.rawText || '');
       setCapo(importData.capo || 0);
+      if (importData.bpm) setBpm(importData.bpm);
     }
   }, [songId, importData, getSong]);
 

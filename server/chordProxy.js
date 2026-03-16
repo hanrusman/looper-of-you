@@ -224,6 +224,32 @@ async function combinedSearch(query) {
 }
 
 /**
+ * Look up BPM from Deezer (free API, no auth).
+ * Halves the value when >115 to compensate for double-time detection.
+ */
+async function lookupBpm(title, artist) {
+  try {
+    const query = `${title} ${artist}`.trim();
+    const res = await fetchUrl(
+      `https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=1`
+    );
+    if (res.status !== 200) return 0;
+    const json = JSON.parse(res.data);
+    const trackId = json.data?.[0]?.id;
+    if (!trackId) return 0;
+
+    const detail = await fetchUrl(`https://api.deezer.com/track/${trackId}`);
+    if (detail.status !== 200) return 0;
+    const track = JSON.parse(detail.data);
+    let bpm = track.bpm || 0;
+    if (bpm > 115) bpm = Math.round(bpm / 2);
+    return bpm;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Vite server middleware plugin for chord search and fetch.
  */
 export function chordProxyPlugin() {
@@ -263,16 +289,23 @@ export function chordProxyPlugin() {
             return;
           }
 
+          const songTitle = url.searchParams.get('title') || '';
+          const songArtist = url.searchParams.get('artist') || '';
+
           let result;
           if (source === 'cifraclub') {
             result = await fetchCifraClubContent(tabUrl);
             if (result) {
+              const effectiveTitle = result.title || songTitle;
+              const effectiveArtist = result.artist || songArtist;
+              const bpm = await lookupBpm(effectiveTitle, effectiveArtist);
               res.setHeader('Content-Type', 'application/json');
               res.end(
                 JSON.stringify({
                   content: result.content,
-                  title: result.title,
-                  artist: result.artist,
+                  title: effectiveTitle,
+                  artist: effectiveArtist,
+                  bpm,
                   source: 'cifraclub',
                 })
               );
@@ -281,10 +314,12 @@ export function chordProxyPlugin() {
           } else {
             const content = await fetchGuitarTabsContent(tabUrl);
             if (content) {
+              const bpm = await lookupBpm(songTitle, songArtist);
               res.setHeader('Content-Type', 'application/json');
               res.end(
                 JSON.stringify({
                   content,
+                  bpm,
                   source: 'guitartabs',
                 })
               );

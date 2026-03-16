@@ -82,7 +82,7 @@ export default function SongImportScreen({ onImport, onBack }) {
     setError(null);
     try {
       const res = await fetch(
-        `/api/chords/fetch?url=${encodeURIComponent(result.url)}&source=${result.source}`
+        `/api/chords/fetch?url=${encodeURIComponent(result.url)}&source=${result.source}&title=${encodeURIComponent(result.title)}&artist=${encodeURIComponent(result.artist)}`
       );
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -102,6 +102,7 @@ export default function SongImportScreen({ onImport, onBack }) {
         artist: data.artist || result.artist,
         rawText: chordProText,
         capo,
+        bpm: data.bpm || 0,
       });
     } catch (err) {
       setError(err.message || 'Er ging iets mis bij het importeren');
