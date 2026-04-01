@@ -5,26 +5,32 @@ import CurrentChord from '../components/player/CurrentChord';
 import LyricsDisplay from '../components/player/LyricsDisplay';
 import PlayerControls from '../components/player/PlayerControls';
 import YouTubePlayer from '../components/player/YouTubePlayer';
+import SpotifyPlayer from '../components/player/SpotifyPlayer';
 import SongStructureMap from '../components/player/SongStructureMap';
 
 export default function SongPlayerScreen({ songId, onBack }) {
   const song = useSongStore((s) => s.getSong(songId));
-  const { loadSong, stop, currentChordIndex, setYtPlayerRef, onYouTubeStateChange, jumpToChordIndex } = usePlayerStore();
+  const { loadSong, stop, currentChordIndex, setYtPlayerRef, setSpotifyPlayerRef, onYouTubeStateChange, jumpToChordIndex } = usePlayerStore();
   const ytPlayerRef = useRef(null);
+  const spotifyPlayerRef = useRef(null);
+
+  const audioSource = song?.audioSource || (song?.youtubeId ? 'youtube' : 'none');
 
   useEffect(() => {
     if (song) {
       setYtPlayerRef(ytPlayerRef);
+      setSpotifyPlayerRef(spotifyPlayerRef);
       loadSong(song);
     }
     return () => {
       stop();
       setYtPlayerRef(null);
+      setSpotifyPlayerRef(null);
     };
   }, [songId]);
 
-  const handleYTStateChange = useCallback((state) => {
-    onYouTubeStateChange(state);
+  const handleAudioStateChange = useCallback((state) => {
+    onYouTubeStateChange(state); // Same handler works for both — uses YT state codes
   }, [onYouTubeStateChange]);
 
   if (!song) {
@@ -74,12 +80,21 @@ export default function SongPlayerScreen({ songId, onBack }) {
         }}
       />
 
-      {/* YouTube Player (only if video available) */}
-      <YouTubePlayer
-        ref={ytPlayerRef}
-        youtubeId={song.youtubeId}
-        onStateChange={handleYTStateChange}
-      />
+      {/* Audio Player */}
+      {audioSource === 'youtube' && (
+        <YouTubePlayer
+          ref={ytPlayerRef}
+          youtubeId={song.youtubeId}
+          onStateChange={handleAudioStateChange}
+        />
+      )}
+      {audioSource === 'spotify' && (
+        <SpotifyPlayer
+          ref={spotifyPlayerRef}
+          spotifyUri={song.spotifyUri}
+          onStateChange={handleAudioStateChange}
+        />
+      )}
 
       {/* Main content: chord diagram + lyrics */}
       <div className="flex flex-col md:landscape:flex-row flex-1 min-h-0">

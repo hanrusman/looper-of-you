@@ -23,8 +23,11 @@ const usePlayerStore = create((set, get) => ({
 
   // Sync mode fields
   syncMode: false,
+  audioSource: 'none', // 'none' | 'youtube' | 'spotify'
   youtubeStartTime: 0,
+  spotifyStartTime: 0,
   ytPlayerRef: null, // set by SongPlayerScreen
+  spotifyPlayerRef: null, // set by SongPlayerScreen
 
   // Sync fine-tune offset (seconds, adjustable by user)
   syncOffset: 0,
@@ -38,6 +41,7 @@ const usePlayerStore = create((set, get) => ({
   midiTempo: null, // original MIDI tempo for tempo scaling
 
   setYtPlayerRef: (ref) => set({ ytPlayerRef: ref }),
+  setSpotifyPlayerRef: (ref) => set({ spotifyPlayerRef: ref }),
 
   loadSong: (song) => {
     // Clean up any running timers
@@ -46,7 +50,8 @@ const usePlayerStore = create((set, get) => ({
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
     playStartTime = null;
 
-    const hasSyncVideo = !!(song.youtubeId);
+    const audioSource = song.audioSource || (song.youtubeId ? 'youtube' : 'none');
+    const hasSyncAudio = audioSource === 'youtube' || audioSource === 'spotify';
     const parsed = parseStrumPattern(song.strumPattern);
     const chordCount = song.chordSequence?.length || 0;
     const hasTimings = song.chordTimings && song.chordTimings.length === chordCount;
@@ -59,8 +64,10 @@ const usePlayerStore = create((set, get) => ({
       bpm: song.bpm || 80,
       beatsPerChord: song.beatsPerChord || 4,
       totalChords: chordCount,
-      syncMode: hasSyncVideo,
+      syncMode: hasSyncAudio,
+      audioSource,
       youtubeStartTime: song.youtubeStartTime || 0,
+      spotifyStartTime: song.spotifyStartTime || 0,
       strumPattern: parsed,
       strumSubdivision: 0,
       chordTimings: hasTimings ? song.chordTimings : null,
@@ -75,10 +82,10 @@ const usePlayerStore = create((set, get) => ({
     set({ isPlaying: true });
 
     if (state.syncMode) {
-      // SYNC MODE: control YouTube + poll position
-      const ytRef = state.ytPlayerRef;
-      if (ytRef?.current?.isReady()) {
-        ytRef.current.play();
+      // SYNC MODE: control audio player + poll position
+      const playerRef = _getAudioPlayerRef(state);
+      if (playerRef?.current?.isReady()) {
+        playerRef.current.play();
       }
       _startSyncPoll(get, set);
     } else if (state.chordTimings) {
@@ -94,9 +101,9 @@ const usePlayerStore = create((set, get) => ({
     const state = get();
 
     if (state.syncMode) {
-      const ytRef = state.ytPlayerRef;
-      if (ytRef?.current?.isReady()) {
-        ytRef.current.pause();
+      const playerRef = _getAudioPlayerRef(state);
+      if (playerRef?.current?.isReady()) {
+        playerRef.current.pause();
       }
       if (syncPollId) { cancelAnimationFrame(syncPollId); syncPollId = null; }
     } else {
@@ -111,9 +118,9 @@ const usePlayerStore = create((set, get) => ({
     const state = get();
 
     if (state.syncMode) {
-      const ytRef = state.ytPlayerRef;
-      if (ytRef?.current?.isReady()) {
-        ytRef.current.stop();
+      const playerRef = _getAudioPlayerRef(state);
+      if (playerRef?.current?.isReady()) {
+        playerRef.current.stop();
       }
       if (syncPollId) { cancelAnimationFrame(syncPollId); syncPollId = null; }
     } else {
@@ -151,18 +158,19 @@ const usePlayerStore = create((set, get) => ({
     const clamped = Math.max(0, Math.min(chordIndex, state.totalChords - 1));
 
     if (state.syncMode) {
-      // Calculate the time position for this chord index and seek YouTube
+      // Calculate the time position for this chord index and seek audio player
+      const startTime = state.audioSource === 'spotify' ? (state.spotifyStartTime || 0) : state.youtubeStartTime;
       let targetTime;
       if (state.chordTimings) {
-        targetTime = state.youtubeStartTime + state.chordTimings[clamped] - SYNC_LOOKAHEAD_S - state.syncOffset;
+        targetTime = startTime + state.chordTimings[clamped] - SYNC_LOOKAHEAD_S - state.syncOffset;
       } else {
         const secondsPerBeat = 60 / state.bpm;
         const secondsPerChord = state.beatsPerChord * secondsPerBeat;
-        targetTime = state.youtubeStartTime + (clamped * secondsPerChord) - SYNC_LOOKAHEAD_S - state.syncOffset;
+        targetTime = startTime + (clamped * secondsPerChord) - SYNC_LOOKAHEAD_S - state.syncOffset;
       }
-      const ytRef = state.ytPlayerRef;
-      if (ytRef?.current?.isReady()) {
-        ytRef.current.seekTo(targetTime);
+      const playerRef = _getAudioPlayerRef(state);
+      if (playerRef?.current?.isReady()) {
+        playerRef.current.seekTo(targetTime);
       }
     } else if (state.chordTimings && state.isPlaying) {
       // Reset the rAF timer to start from this chord's time
@@ -317,6 +325,14 @@ function _startTimerMode(get, set, overrideBpm) {
   }
 }
 
+/**
+ * Get the active audio player ref based on audioSource.
+ */
+function _getAudioPlayerRef(state) {
+  if (state.audioSource === 'spotify') return state.spotifyPlayerRef;
+  return state.ytPlayerRef;
+}
+
 function _startSyncPoll(get, set) {
   if (syncPollId) cancelAnimationFrame(syncPollId);
 
@@ -325,14 +341,15 @@ function _startSyncPoll(get, set) {
 
     if (!state.isPlaying || !state.syncMode) return;
 
-    const ytRef = state.ytPlayerRef;
-    if (!ytRef?.current?.isReady()) {
+    const playerRef = _getAudioPlayerRef(state);
+    if (!playerRef?.current?.isReady()) {
       syncPollId = requestAnimationFrame(poll);
       return;
     }
 
-    const videoTime = ytRef.current.getCurrentTime();
-    const elapsed = videoTime - state.youtubeStartTime + SYNC_LOOKAHEAD_S + state.syncOffset;
+    const currentTime = playerRef.current.getCurrentTime();
+    const startTime = state.audioSource === 'spotify' ? (state.spotifyStartTime || 0) : state.youtubeStartTime;
+    const elapsed = currentTime - startTime + SYNC_LOOKAHEAD_S + state.syncOffset;
 
     if (elapsed < 0) {
       // Still in intro before first chord

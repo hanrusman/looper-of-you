@@ -78,7 +78,7 @@ const useSongStore = create(
     }),
     {
       name: 'akkoordenboek-songs',
-      version: 6,
+      version: 7,
       migrate: (persistedState, version) => {
         if (version < 5) {
           // Wipe all sample songs so they get re-added with correct data
@@ -92,7 +92,7 @@ const useSongStore = create(
         }
         if (version < 6) {
           // Add MIDI timing fields to existing songs
-          return {
+          persistedState = {
             ...persistedState,
             songs: (persistedState.songs || []).map((s) => ({
               ...s,
@@ -100,6 +100,18 @@ const useSongStore = create(
               midiTempo: s.midiTempo || null,
               midiTimeSignature: s.midiTimeSignature || null,
               midiFileName: s.midiFileName || null,
+            })),
+          };
+        }
+        if (version < 7) {
+          // Add Spotify fields to existing songs
+          return {
+            ...persistedState,
+            songs: (persistedState.songs || []).map((s) => ({
+              ...s,
+              audioSource: s.youtubeId ? 'youtube' : 'none',
+              spotifyUri: s.spotifyUri || null,
+              spotifyStartTime: s.spotifyStartTime || 0,
             })),
           };
         }
