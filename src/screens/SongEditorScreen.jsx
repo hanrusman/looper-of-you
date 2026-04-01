@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import useSongStore from '../store/songStore';
 import Button from '../components/ui/Button';
-import { parseChordPro } from '../lib/chordProParser';
+import { parseChordPro, extractChordSequence } from '../lib/chordProParser';
 import { CHORD_LIBRARY } from '../data/chords';
 import { extractYouTubeId } from '../lib/youtubeUtils';
 import { STRUM_PRESETS } from '../data/strumPatterns';
 import { parseStrumPattern } from '../lib/strumUtils';
 import StrumPattern from '../components/player/StrumPattern';
 import useTapTempo from '../hooks/useTapTempo';
+import { parseMidiFile, mapOnsetsToChords, autoSelectTrack } from '../lib/midiParser';
 
 export default function SongEditorScreen({ songId, importData, onSave, onBack }) {
   const { getSong, addSong, updateSong, deleteSong } = useSongStore();
@@ -22,6 +23,15 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
   const [strumPreset, setStrumPreset] = useState('none');
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [youtubeStartTime, setYoutubeStartTime] = useState(0);
+
+  // MIDI timing state
+  const [midiData, setMidiData] = useState(null); // parsed MIDI result
+  const [midiFileName, setMidiFileName] = useState('');
+  const [selectedTrackIdx, setSelectedTrackIdx] = useState(0);
+  const [chordTimings, setChordTimings] = useState(null);
+  const [midiTempo, setMidiTempo] = useState(null);
+  const [midiTimeSignature, setMidiTimeSignature] = useState(null);
+  const [midiWarning, setMidiWarning] = useState(null);
 
   const isEditing = !!songId;
 
@@ -47,6 +57,12 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
         setStrumPreset(matchingPreset ? matchingPreset.id : (song.strumPattern ? 'custom' : 'none'));
         setYoutubeUrl(song.youtubeId ? `https://youtu.be/${song.youtubeId}` : '');
         setYoutubeStartTime(song.youtubeStartTime || 0);
+        if (song.chordTimings) {
+          setChordTimings(song.chordTimings);
+          setMidiTempo(song.midiTempo || null);
+          setMidiTimeSignature(song.midiTimeSignature || null);
+          setMidiFileName(song.midiFileName || 'MIDI geladen');
+        }
       }
     } else if (importData) {
       // Pre-fill from imported data
@@ -71,6 +87,10 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
       rawText: rawText.trim(),
       youtubeId: extractYouTubeId(youtubeUrl),
       youtubeStartTime: Number(youtubeStartTime) || 0,
+      chordTimings: chordTimings || null,
+      midiTempo: midiTempo || null,
+      midiTimeSignature: midiTimeSignature || null,
+      midiFileName: midiFileName || null,
     };
 
     if (isEditing) {
@@ -90,7 +110,66 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
 
   // Preview: parse the raw text
   const previewSections = rawText ? parseChordPro(rawText) : [];
+  const chordCount = useMemo(
+    () => extractChordSequence(previewSections).length,
+    [previewSections]
+  );
   const previewYoutubeId = extractYouTubeId(youtubeUrl);
+
+  // Handle MIDI file upload
+  const handleMidiUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const buffer = await file.arrayBuffer();
+      const parsed = parseMidiFile(buffer);
+      setMidiData(parsed);
+      setMidiFileName(file.name);
+      setMidiTempo(parsed.tempo);
+      setMidiTimeSignature(parsed.timeSignature);
+      setBpm(parsed.tempo);
+
+      // Auto-select best matching track
+      const bestIdx = autoSelectTrack(parsed.tracks, chordCount);
+      setSelectedTrackIdx(bestIdx);
+
+      // Map onsets to chords
+      if (parsed.tracks[bestIdx]) {
+        const { chordTimings: timings, warning } = mapOnsetsToChords(
+          parsed.tracks[bestIdx].onsets,
+          chordCount
+        );
+        setChordTimings(timings);
+        setMidiWarning(warning);
+      }
+    } catch (err) {
+      setMidiWarning('Kon MIDI-bestand niet lezen: ' + (err.message || 'onbekende fout'));
+    }
+  };
+
+  // Handle track selection change
+  const handleTrackChange = (idx) => {
+    setSelectedTrackIdx(idx);
+    if (midiData?.tracks[idx]) {
+      const { chordTimings: timings, warning } = mapOnsetsToChords(
+        midiData.tracks[idx].onsets,
+        chordCount
+      );
+      setChordTimings(timings);
+      setMidiWarning(warning);
+    }
+  };
+
+  // Remove MIDI
+  const handleRemoveMidi = () => {
+    setMidiData(null);
+    setMidiFileName('');
+    setChordTimings(null);
+    setMidiTempo(null);
+    setMidiTimeSignature(null);
+    setMidiWarning(null);
+    setSelectedTrackIdx(0);
+  };
 
   // Find unknown chords
   const unknownChords = new Set();
@@ -247,6 +326,109 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
                 placeholder="0"
                 className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 bg-white text-gray-800 font-semibold focus:border-primary focus:outline-none transition-colors"
               />
+            </div>
+          )}
+        </div>
+
+        {/* MIDI timing */}
+        <div>
+          <label className="block text-sm font-bold text-gray-600 mb-1">
+            <span className="inline-flex items-center gap-1.5">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 18V5l12-2v13" />
+                <circle cx="6" cy="18" r="3" />
+                <circle cx="18" cy="16" r="3" />
+              </svg>
+              MIDI-bestand
+            </span>
+          </label>
+          <p className="text-xs text-gray-400 mb-2">
+            Optioneel — upload een MIDI voor exacte timing per akkoord
+          </p>
+
+          {!midiFileName ? (
+            <label className="flex items-center justify-center gap-2 w-full px-4 py-3 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 text-gray-500 font-semibold cursor-pointer hover:border-primary hover:text-primary transition-colors">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              Kies MIDI-bestand
+              <input
+                type="file"
+                accept=".mid,.midi"
+                onChange={handleMidiUpload}
+                className="hidden"
+              />
+            </label>
+          ) : (
+            <div className="space-y-2">
+              {/* File info bar */}
+              <div className="flex items-center justify-between bg-indigo-50 border-2 border-indigo-200 rounded-xl px-4 py-2.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                    <path d="M9 18V5l12-2v13" />
+                    <circle cx="6" cy="18" r="3" />
+                    <circle cx="18" cy="16" r="3" />
+                  </svg>
+                  <span className="text-sm font-semibold text-indigo-700 truncate">{midiFileName}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRemoveMidi}
+                  className="shrink-0 text-indigo-400 hover:text-red-500 transition-colors ml-2"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* MIDI info */}
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="bg-white rounded-lg border border-gray-200 px-2 py-1.5">
+                  <div className="text-xs text-gray-400">Tempo</div>
+                  <div className="text-sm font-bold text-gray-700">{midiTempo} BPM</div>
+                </div>
+                <div className="bg-white rounded-lg border border-gray-200 px-2 py-1.5">
+                  <div className="text-xs text-gray-400">Maatsoort</div>
+                  <div className="text-sm font-bold text-gray-700">
+                    {midiTimeSignature ? `${midiTimeSignature[0]}/${midiTimeSignature[1]}` : '-'}
+                  </div>
+                </div>
+                <div className="bg-white rounded-lg border border-gray-200 px-2 py-1.5">
+                  <div className="text-xs text-gray-400">Match</div>
+                  <div className={`text-sm font-bold ${chordTimings?.length === chordCount ? 'text-green-600' : 'text-amber-600'}`}>
+                    {chordTimings?.length || 0}/{chordCount}
+                  </div>
+                </div>
+              </div>
+
+              {/* Track selection */}
+              {midiData && midiData.tracks.length > 1 && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">Track</label>
+                  <select
+                    value={selectedTrackIdx}
+                    onChange={(e) => handleTrackChange(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-xl border-2 border-gray-200 bg-white text-gray-800 text-sm font-semibold focus:border-primary focus:outline-none transition-colors"
+                  >
+                    {midiData.tracks.map((t, i) => (
+                      <option key={i} value={i}>
+                        {t.name} — {t.onsetCount} wisselingen ({t.noteCount} noten)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Warning */}
+              {midiWarning && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-700">
+                  {midiWarning}
+                </div>
+              )}
             </div>
           )}
         </div>
