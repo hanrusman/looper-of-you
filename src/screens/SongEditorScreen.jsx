@@ -8,7 +8,7 @@ import { STRUM_PRESETS } from '../data/strumPatterns';
 import { parseStrumPattern } from '../lib/strumUtils';
 import StrumPattern from '../components/player/StrumPattern';
 import useTapTempo from '../hooks/useTapTempo';
-import { parseMidiFile, mapOnsetsToChords, autoSelectTrack } from '../lib/midiParser';
+import { parseMidiFile, filterOnsets, autoFindInterval, mapOnsetsToChords, autoSelectTrack } from '../lib/midiParser';
 
 export default function SongEditorScreen({ songId, importData, onSave, onBack }) {
   const { getSong, addSong, updateSong, deleteSong } = useSongStore();
@@ -28,10 +28,12 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
   const [midiData, setMidiData] = useState(null); // parsed MIDI result
   const [midiFileName, setMidiFileName] = useState('');
   const [selectedTrackIdx, setSelectedTrackIdx] = useState(0);
+  const [midiInterval, setMidiInterval] = useState(1); // min seconds between chord changes
   const [chordTimings, setChordTimings] = useState(null);
   const [midiTempo, setMidiTempo] = useState(null);
   const [midiTimeSignature, setMidiTimeSignature] = useState(null);
   const [midiWarning, setMidiWarning] = useState(null);
+  const [filteredOnsetCount, setFilteredOnsetCount] = useState(0);
 
   const isEditing = !!songId;
 
@@ -116,6 +118,17 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
   );
   const previewYoutubeId = extractYouTubeId(youtubeUrl);
 
+  // Apply interval filter and map to chords
+  const applyMidiMapping = (tracks, trackIdx, interval) => {
+    if (!tracks?.[trackIdx]) return;
+    const raw = tracks[trackIdx].rawOnsets;
+    const filtered = filterOnsets(raw, interval);
+    setFilteredOnsetCount(filtered.length);
+    const { chordTimings: timings, warning } = mapOnsetsToChords(filtered, chordCount);
+    setChordTimings(timings);
+    setMidiWarning(warning);
+  };
+
   // Handle MIDI file upload
   const handleMidiUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -133,12 +146,15 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
       const bestIdx = autoSelectTrack(parsed.tracks, chordCount);
       setSelectedTrackIdx(bestIdx);
 
-      // Map onsets to chords
+      // Auto-find the best interval
       if (parsed.tracks[bestIdx]) {
-        const { chordTimings: timings, warning } = mapOnsetsToChords(
-          parsed.tracks[bestIdx].onsets,
+        const { interval, onsets, count } = autoFindInterval(
+          parsed.tracks[bestIdx].rawOnsets,
           chordCount
         );
+        setMidiInterval(interval);
+        setFilteredOnsetCount(count);
+        const { chordTimings: timings, warning } = mapOnsetsToChords(onsets, chordCount);
         setChordTimings(timings);
         setMidiWarning(warning);
       }
@@ -151,13 +167,16 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
   const handleTrackChange = (idx) => {
     setSelectedTrackIdx(idx);
     if (midiData?.tracks[idx]) {
-      const { chordTimings: timings, warning } = mapOnsetsToChords(
-        midiData.tracks[idx].onsets,
-        chordCount
-      );
-      setChordTimings(timings);
-      setMidiWarning(warning);
+      const { interval } = autoFindInterval(midiData.tracks[idx].rawOnsets, chordCount);
+      setMidiInterval(interval);
+      applyMidiMapping(midiData.tracks, idx, interval);
     }
+  };
+
+  // Handle interval slider change
+  const handleIntervalChange = (newInterval) => {
+    setMidiInterval(newInterval);
+    applyMidiMapping(midiData?.tracks, selectedTrackIdx, newInterval);
   };
 
   // Remove MIDI
@@ -169,6 +188,8 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
     setMidiTimeSignature(null);
     setMidiWarning(null);
     setSelectedTrackIdx(0);
+    setMidiInterval(1);
+    setFilteredOnsetCount(0);
   };
 
   // Find unknown chords
@@ -386,6 +407,7 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
               </div>
 
               {/* MIDI info */}
+              {/* MIDI info */}
               <div className="grid grid-cols-3 gap-2 text-center">
                 <div className="bg-white rounded-lg border border-gray-200 px-2 py-1.5">
                   <div className="text-xs text-gray-400">Tempo</div>
@@ -399,8 +421,8 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
                 </div>
                 <div className="bg-white rounded-lg border border-gray-200 px-2 py-1.5">
                   <div className="text-xs text-gray-400">Match</div>
-                  <div className={`text-sm font-bold ${chordTimings?.length === chordCount ? 'text-green-600' : 'text-amber-600'}`}>
-                    {chordTimings?.length || 0}/{chordCount}
+                  <div className={`text-sm font-bold ${filteredOnsetCount === chordCount ? 'text-green-600' : 'text-amber-600'}`}>
+                    {filteredOnsetCount}/{chordCount}
                   </div>
                 </div>
               </div>
@@ -416,10 +438,35 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
                   >
                     {midiData.tracks.map((t, i) => (
                       <option key={i} value={i}>
-                        {t.name} — {t.onsetCount} wisselingen ({t.noteCount} noten)
+                        {t.name} — {t.rawOnsetCount} noot-events ({t.noteCount} noten)
                       </option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {/* Interval slider */}
+              {midiData && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">
+                    Min. interval tussen akkoorden: {midiInterval}s
+                  </label>
+                  <p className="text-xs text-gray-400 mb-1.5">
+                    Verschuif tot het aantal ({filteredOnsetCount}) overeenkomt met je akkoorden ({chordCount})
+                  </p>
+                  <input
+                    type="range"
+                    min="0.05"
+                    max="8"
+                    step="0.05"
+                    value={midiInterval}
+                    onChange={(e) => handleIntervalChange(Number(e.target.value))}
+                    className="w-full accent-indigo-500"
+                  />
+                  <div className="flex justify-between text-xs text-gray-400 mt-0.5">
+                    <span>0.05s (alle noten)</span>
+                    <span>8s (alleen langzame)</span>
+                  </div>
                 </div>
               )}
 
