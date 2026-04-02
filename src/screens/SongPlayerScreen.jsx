@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import useSongStore from '../store/songStore';
 import usePlayerStore from '../store/playerStore';
 import CurrentChord from '../components/player/CurrentChord';
@@ -6,13 +6,17 @@ import LyricsDisplay from '../components/player/LyricsDisplay';
 import PlayerControls from '../components/player/PlayerControls';
 import YouTubePlayer from '../components/player/YouTubePlayer';
 import SpotifyPlayer from '../components/player/SpotifyPlayer';
+import AudioFilePlayer from '../components/player/AudioFilePlayer';
 import SongStructureMap from '../components/player/SongStructureMap';
+import { getAudioBlobUrl } from '../lib/audioStorage';
 
 export default function SongPlayerScreen({ songId, onBack }) {
   const song = useSongStore((s) => s.getSong(songId));
-  const { loadSong, stop, currentChordIndex, setYtPlayerRef, setSpotifyPlayerRef, onYouTubeStateChange, jumpToChordIndex } = usePlayerStore();
+  const { loadSong, stop, currentChordIndex, setYtPlayerRef, setSpotifyPlayerRef, setAudioFilePlayerRef, onYouTubeStateChange, jumpToChordIndex } = usePlayerStore();
   const ytPlayerRef = useRef(null);
   const spotifyPlayerRef = useRef(null);
+  const audioFilePlayerRef = useRef(null);
+  const [audioFileUrl, setAudioFileUrl] = useState(null);
 
   const audioSource = song?.audioSource || (song?.youtubeId ? 'youtube' : 'none');
 
@@ -20,12 +24,20 @@ export default function SongPlayerScreen({ songId, onBack }) {
     if (song) {
       setYtPlayerRef(ytPlayerRef);
       setSpotifyPlayerRef(spotifyPlayerRef);
+      setAudioFilePlayerRef(audioFilePlayerRef);
       loadSong(song);
+
+      // Load audio file blob URL if needed
+      if (audioSource === 'file') {
+        getAudioBlobUrl(song.id).then((url) => setAudioFileUrl(url));
+      }
     }
     return () => {
       stop();
       setYtPlayerRef(null);
       setSpotifyPlayerRef(null);
+      setAudioFilePlayerRef(null);
+      if (audioFileUrl) URL.revokeObjectURL(audioFileUrl);
     };
   }, [songId]);
 
@@ -92,6 +104,13 @@ export default function SongPlayerScreen({ songId, onBack }) {
         <SpotifyPlayer
           ref={spotifyPlayerRef}
           spotifyUri={song.spotifyUri}
+          onStateChange={handleAudioStateChange}
+        />
+      )}
+      {audioSource === 'file' && (
+        <AudioFilePlayer
+          ref={audioFilePlayerRef}
+          audioUrl={audioFileUrl}
           onStateChange={handleAudioStateChange}
         />
       )}

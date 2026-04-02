@@ -23,11 +23,13 @@ const usePlayerStore = create((set, get) => ({
 
   // Sync mode fields
   syncMode: false,
-  audioSource: 'none', // 'none' | 'youtube' | 'spotify'
+  audioSource: 'none', // 'none' | 'youtube' | 'spotify' | 'file'
   youtubeStartTime: 0,
   spotifyStartTime: 0,
+  audioFileStartTime: 0,
   ytPlayerRef: null, // set by SongPlayerScreen
   spotifyPlayerRef: null, // set by SongPlayerScreen
+  audioFilePlayerRef: null, // set by SongPlayerScreen
 
   // Sync fine-tune offset (seconds, adjustable by user)
   syncOffset: 0,
@@ -42,6 +44,7 @@ const usePlayerStore = create((set, get) => ({
 
   setYtPlayerRef: (ref) => set({ ytPlayerRef: ref }),
   setSpotifyPlayerRef: (ref) => set({ spotifyPlayerRef: ref }),
+  setAudioFilePlayerRef: (ref) => set({ audioFilePlayerRef: ref }),
 
   loadSong: (song) => {
     // Clean up any running timers
@@ -51,7 +54,7 @@ const usePlayerStore = create((set, get) => ({
     playStartTime = null;
 
     const audioSource = song.audioSource || (song.youtubeId ? 'youtube' : 'none');
-    const hasSyncAudio = audioSource === 'youtube' || audioSource === 'spotify';
+    const hasSyncAudio = audioSource === 'youtube' || audioSource === 'spotify' || audioSource === 'file';
     const parsed = parseStrumPattern(song.strumPattern);
     const chordCount = song.chordSequence?.length || 0;
     const hasTimings = song.chordTimings && song.chordTimings.length === chordCount;
@@ -68,6 +71,7 @@ const usePlayerStore = create((set, get) => ({
       audioSource,
       youtubeStartTime: song.youtubeStartTime || 0,
       spotifyStartTime: song.spotifyStartTime || 0,
+      audioFileStartTime: song.audioFileStartTime || 0,
       strumPattern: parsed,
       strumSubdivision: 0,
       chordTimings: hasTimings ? song.chordTimings : null,
@@ -159,7 +163,7 @@ const usePlayerStore = create((set, get) => ({
 
     if (state.syncMode) {
       // Calculate the time position for this chord index and seek audio player
-      const startTime = state.audioSource === 'spotify' ? (state.spotifyStartTime || 0) : state.youtubeStartTime;
+      const startTime = _getStartTime(state);
       let targetTime;
       if (state.chordTimings) {
         targetTime = startTime + state.chordTimings[clamped] - SYNC_LOOKAHEAD_S - state.syncOffset;
@@ -328,8 +332,15 @@ function _startTimerMode(get, set, overrideBpm) {
 /**
  * Get the active audio player ref based on audioSource.
  */
+function _getStartTime(state) {
+  if (state.audioSource === 'spotify') return state.spotifyStartTime || 0;
+  if (state.audioSource === 'file') return state.audioFileStartTime || 0;
+  return state.youtubeStartTime || 0;
+}
+
 function _getAudioPlayerRef(state) {
   if (state.audioSource === 'spotify') return state.spotifyPlayerRef;
+  if (state.audioSource === 'file') return state.audioFilePlayerRef;
   return state.ytPlayerRef;
 }
 
@@ -348,7 +359,7 @@ function _startSyncPoll(get, set) {
     }
 
     const currentTime = playerRef.current.getCurrentTime();
-    const startTime = state.audioSource === 'spotify' ? (state.spotifyStartTime || 0) : state.youtubeStartTime;
+    const startTime = _getStartTime(state);
     const elapsed = currentTime - startTime + SYNC_LOOKAHEAD_S + state.syncOffset;
 
     if (elapsed < 0) {

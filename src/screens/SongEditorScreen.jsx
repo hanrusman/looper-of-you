@@ -9,6 +9,8 @@ import { parseStrumPattern } from '../lib/strumUtils';
 import StrumPattern from '../components/player/StrumPattern';
 import useTapTempo from '../hooks/useTapTempo';
 import { parseMidiFile, filterOnsets, autoFindInterval, mapOnsetsToChords, autoSelectTrack } from '../lib/midiParser';
+import { detectBeats, mapBeatsToChords } from '../lib/beatDetector';
+import { saveAudioFile, loadAudioFile, deleteAudioFile } from '../lib/audioStorage';
 import SpotifyTrackSearch from '../components/editor/SpotifyTrackSearch';
 
 export default function SongEditorScreen({ songId, importData, onSave, onBack }) {
@@ -28,6 +30,13 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
   const [spotifyUri, setSpotifyUri] = useState('');
   const [spotifyTrackName, setSpotifyTrackName] = useState('');
   const [spotifyStartTime, setSpotifyStartTime] = useState(0);
+  const [audioFileName, setAudioFileName] = useState('');
+  const [audioFileStartTime, setAudioFileStartTime] = useState(0);
+  const [audioFileBuffer, setAudioFileBuffer] = useState(null); // ArrayBuffer for saving
+  const [audioFileMime, setAudioFileMime] = useState('');
+  const [beatDetecting, setBeatDetecting] = useState(false);
+  const [detectedBPM, setDetectedBPM] = useState(null);
+  const [detectedBeats, setDetectedBeats] = useState(null);
 
   // MIDI timing state
   const [midiData, setMidiData] = useState(null); // parsed MIDI result
@@ -67,6 +76,17 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
         setYoutubeStartTime(song.youtubeStartTime || 0);
         setSpotifyUri(song.spotifyUri || '');
         setSpotifyStartTime(song.spotifyStartTime || 0);
+        setAudioFileName(song.audioFileName || '');
+        setAudioFileStartTime(song.audioFileStartTime || 0);
+        if (song.audioSource === 'file' && song.audioFileName) {
+          // Load audio file info from IndexedDB
+          loadAudioFile(songId).then((data) => {
+            if (data) {
+              setAudioFileBuffer(data.arrayBuffer);
+              setAudioFileMime(data.mimeType);
+            }
+          });
+        }
         if (song.chordTimings) {
           setChordTimings(song.chordTimings);
           setMidiTempo(song.midiTempo || null);
@@ -84,7 +104,7 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
     }
   }, [songId, importData, getSong]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!title.trim() || !rawText.trim()) return;
 
     const songData = {
@@ -100,17 +120,26 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
       youtubeStartTime: Number(youtubeStartTime) || 0,
       spotifyUri: spotifyUri || null,
       spotifyStartTime: Number(spotifyStartTime) || 0,
+      audioFileName: audioFileName || null,
+      audioFileStartTime: Number(audioFileStartTime) || 0,
       chordTimings: chordTimings || null,
       midiTempo: midiTempo || null,
       midiTimeSignature: midiTimeSignature || null,
       midiFileName: midiFileName || null,
     };
 
+    let savedSongId = songId;
     if (isEditing) {
       updateSong(songId, songData);
     } else {
-      addSong(songData);
+      savedSongId = addSong(songData);
     }
+
+    // Save audio file to IndexedDB
+    if (audioSource === 'file' && audioFileBuffer && savedSongId) {
+      await saveAudioFile(savedSongId, audioFileBuffer, audioFileName, audioFileMime);
+    }
+
     onSave();
   };
 
@@ -318,9 +347,10 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
           {/* Source tabs */}
           <div className="flex gap-1 mb-3 bg-gray-100 rounded-xl p-1">
             {[
-              { id: 'none', label: 'Geen', icon: null },
-              { id: 'youtube', label: 'YouTube', color: '#ef4444' },
-              { id: 'spotify', label: 'Spotify', color: '#1DB954' },
+              { id: 'none', label: 'Geen' },
+              { id: 'file', label: 'MP3' },
+              { id: 'youtube', label: 'YouTube' },
+              { id: 'spotify', label: 'Spotify' },
             ].map((src) => (
               <button
                 key={src.id}
@@ -379,6 +409,116 @@ export default function SongEditorScreen({ songId, importData, onSave, onBack })
                     placeholder="0"
                     className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 bg-white text-gray-800 font-semibold focus:border-primary focus:outline-none transition-colors"
                   />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Audio file (MP3) settings */}
+          {audioSource === 'file' && (
+            <div className="space-y-3">
+              {!audioFileName ? (
+                <label className="flex items-center justify-center gap-2 w-full px-4 py-3 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 text-gray-500 font-semibold cursor-pointer hover:border-violet-400 hover:text-violet-600 transition-colors">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                  {beatDetecting ? 'Beats detecteren...' : 'Kies MP3/WAV bestand'}
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setAudioFileName(file.name);
+                      setAudioFileMime(file.type || 'audio/mpeg');
+                      setBeatDetecting(true);
+                      try {
+                        const buffer = await file.arrayBuffer();
+                        setAudioFileBuffer(buffer);
+                        const result = await detectBeats(buffer);
+                        setDetectedBeats(result.beats);
+                        setDetectedBPM(result.estimatedBPM);
+                        if (result.estimatedBPM) setBpm(result.estimatedBPM);
+                        // Auto-map beats to chords
+                        if (result.beats.length > 0 && chordCount > 0) {
+                          const { chordTimings: timings } = mapBeatsToChords(result.beats, chordCount, Number(beatsPerChord) || 4);
+                          setChordTimings(timings);
+                        }
+                      } catch (err) {
+                        console.error('Beat detection failed:', err);
+                      } finally {
+                        setBeatDetecting(false);
+                      }
+                    }}
+                    className="hidden"
+                    disabled={beatDetecting}
+                  />
+                </label>
+              ) : (
+                <div className="space-y-2">
+                  {/* File info bar */}
+                  <div className="flex items-center justify-between bg-violet-50 border-2 border-violet-200 rounded-xl px-4 py-2.5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                        <path d="M9 18V5l12-2v13" />
+                        <circle cx="6" cy="18" r="3" />
+                        <circle cx="18" cy="16" r="3" />
+                      </svg>
+                      <span className="text-sm font-semibold text-violet-700 truncate">{audioFileName}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAudioFileName('');
+                        setAudioFileBuffer(null);
+                        setAudioFileMime('');
+                        setDetectedBeats(null);
+                        setDetectedBPM(null);
+                        if (songId) deleteAudioFile(songId);
+                      }}
+                      className="shrink-0 text-violet-400 hover:text-red-500 transition-colors ml-2"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {/* Beat detection results */}
+                  {detectedBPM && (
+                    <div className="grid grid-cols-2 gap-2 text-center">
+                      <div className="bg-white rounded-lg border border-gray-200 px-2 py-1.5">
+                        <div className="text-xs text-gray-400">Gedetecteerd tempo</div>
+                        <div className="text-sm font-bold text-gray-700">{detectedBPM} BPM</div>
+                      </div>
+                      <div className="bg-white rounded-lg border border-gray-200 px-2 py-1.5">
+                        <div className="text-xs text-gray-400">Beats gevonden</div>
+                        <div className="text-sm font-bold text-gray-700">{detectedBeats?.length || 0}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Start time */}
+                  <div>
+                    <label className="block text-sm font-bold text-gray-600 mb-1">
+                      Starttijd eerste akkoord (sec)
+                    </label>
+                    <p className="text-xs text-gray-400 mb-2">
+                      Op welke seconde begint het eerste akkoord?
+                    </p>
+                    <input
+                      type="number"
+                      value={audioFileStartTime}
+                      onChange={(e) => setAudioFileStartTime(e.target.value)}
+                      min="0"
+                      step="0.5"
+                      placeholder="0"
+                      className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 bg-white text-gray-800 font-semibold focus:border-primary focus:outline-none transition-colors"
+                    />
+                  </div>
                 </div>
               )}
             </div>
